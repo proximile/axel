@@ -25,6 +25,9 @@ class Axel < Formula
   depends_on "openssl@3"
 
   def install
+    # gettext keeps its m4 macros (AM_GNU_GETTEXT) under share/gettext/m4,
+    # which is off aclocal's default search path; add it so autoreconf works.
+    ENV.prepend_path "ACLOCAL_PATH", "#{Formula["gettext"].opt_share}/gettext/m4"
     system "autoreconf", "-fiv"
     system "./configure", "--disable-Werror", "--disable-nls",
            "SSL_PREFIX=#{Formula["openssl@3"].opt_prefix}",
