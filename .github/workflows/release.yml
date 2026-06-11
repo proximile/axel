@@ -1,0 +1,257 @@
+name: release
+
+# Build the full binary suite and publish it to a GitHub Release whenever a
+# version tag (e.g. v2.18.0) is pushed.
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Version tag to build (e.g. v2.18.0). Used for manual test runs."
+        required: true
+
+permissions:
+  contents: write
+
+env:
+  # Version string without the leading "v" (e.g. 2.18.0). Used in asset names.
+  REF: ${{ github.event.inputs.tag || github.ref_name }}
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Linux: fully static musl binaries, one per architecture, built inside an
+  # Alpine container. No shared-library dependencies -- a single drop-in file
+  # that runs on any Linux distribution.
+  # ---------------------------------------------------------------------------
+  linux:
+    name: linux-${{ matrix.label }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { platform: linux/amd64,   label: x86_64  }
+          - { platform: linux/arm64,   label: aarch64 }
+          - { platform: linux/arm/v7,  label: armv7   }
+          - { platform: linux/arm/v6,  label: armv6   }   # Raspberry Pi Zero / 1
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        if: matrix.label != 'x86_64'
+        uses: docker/setup-qemu-action@v3
+
+      - name: Build static binary (${{ matrix.label }})
+        run: |
+          docker run --rm --platform "${{ matrix.platform }}" \
+            -v "$PWD":/src -w /src alpine:3.20 sh -euc '
+              apk add --no-cache build-base autoconf automake libtool pkgconf \
+                  autoconf-archive gettext-dev openssl-dev openssl-libs-static \
+                  zlib-static txt2man file >/dev/null
+              autoreconf -fiv
+              PKG_CONFIG="pkg-config --static" ./configure --disable-Werror \
+                  CFLAGS="-O2" LDFLAGS="-static -s"
+              make -j"$(nproc)"
+              file ./axel
+              ./axel --version | head -1
+            '
+
+      - name: Package
+        run: |
+          VER="${REF#v}"
+          DIST="axel-${VER}-linux-${{ matrix.label }}"
+          mkdir -p "stage/$DIST"
+          cp axel "stage/$DIST/"
+          cp doc/axel.1 "stage/$DIST/" 2>/dev/null || true
+          cp COPYING README.md "stage/$DIST/" 2>/dev/null || true
+          tar -C stage -czf "${DIST}.tar.gz" "$DIST"
+          # Keep the raw binary too, for the package (deb/rpm) job.
+          mkdir -p rawbin
+          cp axel "rawbin/axel-linux-${{ matrix.label }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tarball-linux-${{ matrix.label }}
+          path: axel-*-linux-${{ matrix.label }}.tar.gz
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rawbin-linux-${{ matrix.label }}
+          path: rawbin/axel-linux-${{ matrix.label }}
+
+  # ---------------------------------------------------------------------------
+  # macOS: build native x86_64 and arm64, then lipo into a universal2 binary.
+  # OpenSSL is statically linked; only the always-present system libraries are
+  # dynamic, so the binary is portable across macOS installs.
+  # ---------------------------------------------------------------------------
+  macos-build:
+    name: macos-${{ matrix.arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: x86_64, runner: macos-13 }   # Intel
+          - { arch: arm64,  runner: macos-14 }   # Apple Silicon
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build tools
+        run: |
+          brew install autoconf automake libtool pkg-config autoconf-archive \
+            txt2man openssl@3
+      - name: Build
+        run: |
+          SSL="$(brew --prefix openssl@3)"
+          autoreconf -fiv
+          ./configure --disable-Werror --disable-nls CFLAGS="-O2" \
+            SSL_CFLAGS="-I$SSL/include" \
+            SSL_LIBS="$SSL/lib/libssl.a $SSL/lib/libcrypto.a"
+          make -j3
+          file ./axel
+          otool -L ./axel || true
+          ./axel --version | head -1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-bin-${{ matrix.arch }}
+          path: axel
+
+  macos-universal:
+    name: macos-universal
+    needs: macos-build
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { name: macos-bin-x86_64, path: x86_64 }
+      - uses: actions/download-artifact@v4
+        with: { name: macos-bin-arm64,  path: arm64 }
+      - name: Lipo + package
+        run: |
+          VER="${REF#v}"
+          DIST="axel-${VER}-macos-universal"
+          chmod +x x86_64/axel arm64/axel
+          lipo -create -output axel x86_64/axel arm64/axel
+          lipo -info axel
+          mkdir -p "stage/$DIST"
+          cp axel "stage/$DIST/"
+          cp COPYING README.md "stage/$DIST/" 2>/dev/null || true
+          tar -C stage -czf "${DIST}.tar.gz" "$DIST"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tarball-macos-universal
+          path: axel-*-macos-universal.tar.gz
+
+  # ---------------------------------------------------------------------------
+  # Debian/RPM packages, wrapping the static Linux binaries with nfpm.
+  # ---------------------------------------------------------------------------
+  packages:
+    name: packages
+    needs: linux
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { name: rawbin-linux-x86_64,  path: bin }
+      - uses: actions/download-artifact@v4
+        with: { name: rawbin-linux-aarch64, path: bin }
+      - name: Build deb + rpm (amd64, arm64)
+        run: |
+          VER="${REF#v}"
+          ls -la bin
+          for pair in "amd64 x86_64" "arm64 aarch64"; do
+            set -- $pair
+            PKG_ARCH="$1"; BIN_ARCH="$2"
+            install -Dm0755 "bin/axel-linux-${BIN_ARCH}" stage/usr/bin/axel
+            install -Dm0644 COPYING stage/usr/share/doc/axel/copyright
+            export VER PKG_ARCH
+            for fmt in deb rpm; do
+              docker run --rm -e VER -e PKG_ARCH \
+                -v "$PWD":/work -w /work goreleaser/nfpm:latest \
+                package --config packaging/nfpm.yaml --packager "$fmt" --target .
+            done
+            rm -rf stage
+          done
+          ls -la *.deb *.rpm
+      - uses: actions/upload-artifact@v4
+        with:
+          name: packages
+          path: |
+            *.deb
+            *.rpm
+
+  # ---------------------------------------------------------------------------
+  # Windows: best-effort Cygwin build. axel targets POSIX, so the binary needs
+  # the Cygwin runtime DLLs, which we bundle alongside it. WSL is the smoother
+  # path for most Windows users (see the README).
+  # ---------------------------------------------------------------------------
+  windows:
+    name: windows-x86_64
+    runs-on: windows-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: cygwin/cygwin-install-action@v4
+        with:
+          packages: >-
+            gcc-core make autoconf automake libtool pkg-config gettext-devel
+            libssl-devel openssl-devel autoconf-archive txt2man zip file
+      - name: Build
+        shell: C:\cygwin\bin\bash.exe --login -o igncr '{0}'
+        run: |
+          cd "$(cygpath '${{ github.workspace }}')"
+          autoreconf -fiv
+          ./configure --disable-Werror --disable-nls CFLAGS="-O2"
+          make -j2
+          file ./axel.exe
+          ./axel.exe --version | head -1
+      - name: Package with runtime DLLs
+        shell: C:\cygwin\bin\bash.exe --login -o igncr '{0}'
+        run: |
+          cd "$(cygpath '${{ github.workspace }}')"
+          VER="${REF#v}"
+          DIST="axel-${VER}-windows-x86_64"
+          mkdir -p "$DIST"
+          cp axel.exe "$DIST/"
+          # Bundle the DLLs the binary links against.
+          for dll in $(cygcheck ./axel.exe | tr -d '\r' | grep -i '\\cygwin\\' | sed 's/^ *//'); do
+            cp "$dll" "$DIST/" 2>/dev/null || true
+          done
+          cp COPYING README.md "$DIST/" 2>/dev/null || true
+          zip -r "${DIST}.zip" "$DIST"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: zip-windows-x86_64
+          path: axel-*-windows-x86_64.zip
+
+  # ---------------------------------------------------------------------------
+  # Collect every artifact and publish the GitHub Release.
+  # ---------------------------------------------------------------------------
+  release:
+    name: release
+    needs: [linux, macos-universal, packages, windows]
+    if: ${{ !cancelled() && needs.linux.result == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Assemble release assets
+        run: |
+          mkdir -p dist
+          find artifacts -type f \( -name '*.tar.gz' -o -name '*.zip' \
+            -o -name '*.deb' -o -name '*.rpm' \) -exec cp {} dist/ \;
+          ls -la dist
+          ( cd dist && sha256sum * > SHA256SUMS )
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${REF}"
+          gh release create "$TAG" dist/* \
+            --repo "${{ github.repository }}" \
+            --title "axel ${TAG#v}" \
+            --generate-notes \
+            --verify-tag || \
+          gh release upload "$TAG" dist/* --repo "${{ github.repository }}" --clobber

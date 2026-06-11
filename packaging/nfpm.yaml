@@ -1,0 +1,46 @@
+# nfpm config for building .deb and .rpm packages from the prebuilt static
+# axel binary. The release workflow stages the binary under ./stage and sets
+# VER and PKG_ARCH in the environment before invoking nfpm once per arch/format.
+name: axel
+arch: ${PKG_ARCH}
+version: ${VER}
+release: 1
+section: web
+priority: optional
+maintainer: proximile <proximile@users.noreply.github.com>
+description: |
+  Lightweight command line download accelerator.
+  Downloads a file from several mirrors and/or connections at once. This build
+  raises the URL length limit so very long links (presigned cloud-storage URLs,
+  OAuth query strings) work out of the box.
+vendor: proximile
+homepage: https://github.com/proximile/axel
+license: GPL-2.0-or-later
+
+# The binary is fully static, so it has no shared-library dependencies.
+contents:
+  - src: stage/usr/bin/axel
+    dst: /usr/bin/axel
+    file_info:
+      mode: 0755
+  - src: stage/usr/share/doc/axel/copyright
+    dst: /usr/share/doc/axel/copyright
+    file_info:
+      mode: 0644
+
+overrides:
+  deb:
+    # Replace and take precedence over the distro's stock axel package.
+    replaces:
+      - axel
+    conflicts:
+      - axel
+    provides:
+      - axel
+  rpm:
+    replaces:
+      - axel
+    conflicts:
+      - axel
+    provides:
+      - axel

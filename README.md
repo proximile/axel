@@ -39,10 +39,53 @@ paid development time through:
   + [![Patreon](https://c5.patreon.com/external/logo/become_a_patron_button.png)](https://www.patreon.com/ismaell)
   + [![Liberapay](https://liberapay.com/assets/widgets/donate.svg)](https://liberapay.com/ismael/donate)
 
-## Installing from binaries
-Your operating system may contain a precompiled version of Axel, and if so you
-should probably use it.  If the package is outdated please get in touch with the
-package maintainer or open a support ticket with your distro.
+## Install
+
+Prebuilt binaries for every release are published on the
+[releases page](https://github.com/proximile/axel/releases). The Linux builds
+are fully static — a single file with no dependencies that runs on any
+distribution and works as a drop-in replacement for the stock `axel`.
+
+### Quick install (Linux & macOS)
+
+    curl -fsSL https://raw.githubusercontent.com/proximile/axel/master/install.sh | sh
+
+This detects your OS and CPU, downloads the matching binary, and installs it to
+`/usr/local/bin` (or `~/.local/bin` if that isn't writable). Pin a version with
+`AXEL_VERSION=v2.18.0` or change the location with `AXEL_INSTALL_DIR=...`.
+
+### Debian / Ubuntu (.deb) and Fedora / RHEL (.rpm)
+
+Download the package for your architecture from the releases page, then:
+
+    sudo apt install ./axel_<version>_amd64.deb      # Debian/Ubuntu
+    sudo dnf install ./axel-<version>.x86_64.rpm     # Fedora/RHEL
+
+These replace the distribution's `axel` package.
+
+### macOS (Homebrew)
+
+    brew install proximile/tap/axel
+
+### Manual / Raspberry Pi
+
+Grab the right tarball from the releases page (including `linux-armv6` for the
+Raspberry Pi Zero and Pi 1), extract it, and copy `axel` onto your `PATH`:
+
+    tar -xzf axel-<version>-linux-aarch64.tar.gz
+    sudo install -m 0755 axel-<version>-linux-aarch64/axel /usr/local/bin/axel
+
+### Windows
+
+Use [WSL](https://learn.microsoft.com/windows/wsl/) and follow the Linux
+instructions above. A Cygwin-based `.zip` is also attached to each release for
+native use; it bundles the runtime DLLs it needs.
+
+### From your distribution
+
+Your operating system may also ship its own packaged version of Axel. If that
+package is outdated, please get in touch with the package maintainer or open a
+support ticket with your distro.
 
 ## Building from source
 WARNING: Building from the source code repository is recommended only when doing
