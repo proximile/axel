@@ -25,7 +25,7 @@ jobs:
           ./configure --disable-Werror --disable-nls CFLAGS="-O2"
           # Build just the program; skip the txt2man man page (not needed on
           # Windows and txt2man is unreliable under Cygwin).
-          make -j2 axel
+          make -j2 axel.exe
           echo "=== where did the binary land? ==="
           find . -maxdepth 2 -name 'axel*.exe' -o -maxdepth 2 -name axel -type f | head
           echo "=== file + run ==="
