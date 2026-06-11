@@ -473,8 +473,8 @@ axel_start(axel_t *axel)
 			}
 
 			axel->conn[i].state = true;
-			if (pthread_create
-			    (axel->conn[i].setup_thread, NULL, setup_thread,
+			if (axel_pthread_create
+			    (axel->conn[i].setup_thread, setup_thread,
 			     &axel->conn[i]) != 0) {
 				axel_message(axel, _("pthread error!!!"));
 				axel->ready = -1;
@@ -655,8 +655,8 @@ axel_do(axel_t *axel)
 						     axel->conn[i].local_if);
 
 				axel->conn[i].state = true;
-				if (pthread_create
-				    (axel->conn[i].setup_thread, NULL,
+				if (axel_pthread_create
+				    (axel->conn[i].setup_thread,
 				     setup_thread, &axel->conn[i]) == 0) {
 					axel->conn[i].last_transfer = axel_gettime();
 				} else {

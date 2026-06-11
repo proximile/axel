@@ -264,18 +264,27 @@ main(int argc, char *argv[])
 		if (!s)
 			goto free_conf;
 
-		if (scanf("%1024[^\n]s", s) != 1) {
+		if (!fgets(s, MAX_STRING, stdin)) {
 			fprintf(stderr,
-				_("Error when trying to read URL (Too long?).\n"));
+				_("Error when trying to read URL.\n"));
+			free(s);
+			goto free_conf;
+		}
+		/* Strip a trailing newline left by fgets. */
+		s[strcspn(s, "\r\n")] = 0;
+		if (strlen(s) >= MAX_STRING - 1) {
+			fprintf(stderr,
+				_("Can't handle URLs of length over %zu\n"),
+				MAX_STRING - 1);
 			free(s);
 			goto free_conf;
 		}
 	} else {
 		s = argv[optind];
-		if (strlen(s) > MAX_STRING) {
+		if (strlen(s) >= MAX_STRING) {
 			fprintf(stderr,
 				_("Can't handle URLs of length over %zu\n"),
-				MAX_STRING);
+				MAX_STRING - 1);
 			goto free_conf;
 		}
 	}

@@ -97,7 +97,9 @@ out:
 int
 search_makelist(search_t *results, char *orig_url)
 {
-	int size = 8192;
+	/* Large enough to hold the query URL, which embeds the (up to
+	 * MAX_STRING) file name; also the initial response read buffer. */
+	int size = MAX_STRING + 512;
 	conn_t conn[1];
 	double t;
 	const char *start, *end;
@@ -243,8 +245,8 @@ search_getspeeds(search_t *results, int count)
 					continue; // running too many, skip
 				results[i].speed = SPEED_ACTIVE;
 				results[i].speed_start_time = axel_gettime();
-				if (pthread_create(results[i].speed_thread,
-						   NULL, search_speedtest,
+				if (axel_pthread_create(results[i].speed_thread,
+						   search_speedtest,
 						   &results[i]) == 0)
 					running++;
 				else

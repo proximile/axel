@@ -94,14 +94,18 @@ abuf_printf(abuf_t *abuf, const char *fmt, ...)
 int
 abuf_strcat(abuf_t *abuf, const char *src)
 {
-	size_t nread = strlcat(abuf->p, src, abuf->len);
-	if (nread > abuf->len) {
-		size_t done = abuf->len - 1;
-		int ret = abuf_setup(abuf, nread);
+	size_t dstlen = abuf->p ? strlen(abuf->p) : 0;
+	size_t srclen = strlen(src);
+	size_t need = dstlen + srclen + 1;	/* +1 for the NUL */
+
+	if (need > abuf->len) {
+		int ret = abuf_setup(abuf, need);
 		if (ret < 0)
 			return ret;
-		memcpy(abuf->p + done, src + done, nread - done);
 	}
+
+	/* realloc() preserved the existing prefix; append src and its NUL. */
+	memcpy(abuf->p + dstlen, src, srclen + 1);
 
 	return 0;
 }

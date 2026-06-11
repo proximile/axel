@@ -225,7 +225,12 @@ http_exec(http_t *conn)
 		conn->request->p);
 #endif
 
-	strlcat(conn->request->p, "\r\n", conn->request->len);
+	/* Terminate the header block with the empty line. Grow the buffer
+	 * if needed -- the request may have filled it exactly. */
+	if (abuf_strcat(conn->request, "\r\n") < 0) {
+		fprintf(stderr, _("Out of memory\n"));
+		return 0;
+	}
 
 	const size_t reqlen = strlen(conn->request->p);
 	size_t nwrite = 0;

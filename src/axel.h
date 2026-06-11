@@ -89,7 +89,13 @@
 #endif
 
 /* Compiled-in settings */
-#define MAX_STRING		((size_t)1024)
+/* Upper bound on URLs and the strings derived from them (host, path, file
+ * name, redirect targets, request lines, ...). Long signed cloud-storage
+ * URLs (S3/GCS/Azure presigned links, OAuth-token query strings) routinely
+ * exceed 1 KiB, so this is sized generously. It is a fixed cap rather than
+ * a dynamic allocation: the on-disk state (.st) file never stores the URL,
+ * so growing this does not affect resumption of in-progress downloads. */
+#define MAX_STRING		((size_t)32768)
 #define MAX_ADD_HEADERS	10
 #define MAX_REDIRECT		20
 #define DEFAULT_IO_TIMEOUT	120
@@ -102,6 +108,28 @@ typedef struct {
 
 typedef message_t url_t;
 typedef message_t axel_if_t;
+
+/*
+ * Worker threads place several MAX_STRING-sized buffers -- and, in the
+ * speed-test path, a whole conn_t -- on their stacks. With MAX_STRING
+ * large, those frames can exceed the small default thread-stack size of
+ * some C libraries (notably musl's 128 KiB), so request an ample stack
+ * explicitly. Falls back to the default stack if the attribute setup fails.
+ */
+static inline int
+axel_pthread_create(pthread_t *thread, void *(*start)(void *), void *arg)
+{
+	pthread_attr_t attr;
+	int ret;
+
+	if (pthread_attr_init(&attr) != 0)
+		return pthread_create(thread, NULL, start, arg);
+
+	pthread_attr_setstacksize(&attr, (size_t)2 << 20);	/* 2 MiB */
+	ret = pthread_create(thread, &attr, start, arg);
+	pthread_attr_destroy(&attr);
+	return ret;
+}
 
 #include "abuf.h"
 #include "conf.h"

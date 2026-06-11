@@ -423,7 +423,7 @@ conn_info(conn_t *conn)
 		return conn_info_ftp(conn);
 	}
 
-	char s[1005];
+	char s[MAX_STRING];
 	long long int i = 0;
 
 	struct urlseq *urlseq = urlseq_init(conn->conf->max_redirect);
@@ -448,7 +448,15 @@ conn_info(conn_t *conn)
 			break;
 		if ((t = http_header(conn->http, "location:")) == NULL)
 			return 0;
-		sscanf(t, "%1000s", s);
+		/* Copy the (whitespace-delimited) Location token, bounded by
+		 * the buffer size rather than a hardcoded width, so long
+		 * redirect targets are not silently truncated. */
+		t += strspn(t, " \t");
+		size_t tlen = strcspn(t, " \t\r\n");
+		if (tlen >= sizeof(s))
+			tlen = sizeof(s) - 1;
+		memcpy(s, t, tlen);
+		s[tlen] = 0;
 		if (s[0] == '/') {
 			abuf_printf(conn->http->headers, "%s%s:%i%s",
 				    scheme_from_proto(conn->proto),
