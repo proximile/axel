@@ -11,7 +11,7 @@ class Axel < Formula
   desc "Lightweight command line download accelerator with long-URL support"
   homepage "https://github.com/proximile/axel"
   url "https://github.com/proximile/axel/archive/refs/tags/v2.18.0.tar.gz"
-  sha256 "REPLACE_WITH_SOURCE_TARBALL_SHA256"
+  sha256 "3318b0ca4125740b16d89d8103a640f43840b4d34799f3af0be7a4be4e005232"
   license "GPL-2.0-or-later"
   head "https://github.com/proximile/axel.git", branch: "master"
 
