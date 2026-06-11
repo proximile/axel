@@ -82,64 +82,59 @@ jobs:
           path: rawbin/axel-linux-${{ matrix.label }}
 
   # ---------------------------------------------------------------------------
-  # macOS: build native x86_64 and arm64, then lipo into a universal2 binary.
-  # OpenSSL is statically linked; only the always-present system libraries are
-  # dynamic, so the binary is portable across macOS installs.
+  # macOS: a single universal2 (Intel + Apple Silicon) binary, built entirely
+  # on an Apple Silicon runner -- the arm64 and x86_64 OpenSSL static libraries
+  # are merged with lipo, then axel is compiled for both architectures at once.
+  # This avoids depending on the scarce Intel runners. OpenSSL is statically
+  # linked; only the always-present system libraries are dynamic.
   # ---------------------------------------------------------------------------
-  macos-build:
-    name: macos-${{ matrix.arch }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - { arch: x86_64, runner: macos-13 }   # Intel
-          - { arch: arm64,  runner: macos-14 }   # Apple Silicon
-    runs-on: ${{ matrix.runner }}
+  macos-universal:
+    name: macos-universal
+    runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
       - name: Install build tools
         run: |
           brew install autoconf automake libtool pkg-config autoconf-archive \
             gettext txt2man openssl@3
-      - name: Build
+      - name: Build universal2 binary
         run: |
           # gettext is keg-only: put its autopoint on PATH and its m4 macros
           # (AM_GNU_GETTEXT lives under share/gettext/m4) on the aclocal path.
           export PATH="$(brew --prefix gettext)/bin:$PATH"
           export ACLOCAL_PATH="$(brew --prefix gettext)/share/gettext/m4"
-          SSL="$(brew --prefix openssl@3)"
+          ARM="$(brew --prefix openssl@3)"
+
+          # Fetch the x86_64 OpenSSL bottle (same formula version as the native
+          # arm64 keg) and merge both into universal static libraries.
+          brew fetch --force --bottle-tag=sonoma openssl@3
+          CACHE="$(brew --cache --bottle-tag=sonoma openssl@3)"
+          mkdir -p x86 && tar -xzf "$CACHE" -C x86
+          X86="$(ls -d "$PWD"/x86/openssl@3/*/)"
+          mkdir -p uni/lib uni/include
+          lipo -create "$ARM/lib/libssl.a"    "$X86/lib/libssl.a"    -output uni/lib/libssl.a
+          lipo -create "$ARM/lib/libcrypto.a" "$X86/lib/libcrypto.a" -output uni/lib/libcrypto.a
+          cp -R "$ARM/include/." uni/include/
+
           autoreconf -fiv
-          ./configure --disable-Werror --disable-nls CFLAGS="-O2" \
-            SSL_CFLAGS="-I$SSL/include" \
-            SSL_LIBS="$SSL/lib/libssl.a $SSL/lib/libcrypto.a"
+          ./configure --disable-Werror --disable-nls \
+            CFLAGS="-O2 -arch arm64 -arch x86_64" \
+            LDFLAGS="-arch arm64 -arch x86_64" \
+            SSL_CFLAGS="-I$PWD/uni/include" \
+            SSL_LIBS="$PWD/uni/lib/libssl.a $PWD/uni/lib/libcrypto.a"
           make -j3
+          strip ./axel
           file ./axel
+          lipo -info ./axel
           otool -L ./axel || true
           ./axel --version | head -1
-      - uses: actions/upload-artifact@v4
-        with:
-          name: macos-bin-${{ matrix.arch }}
-          path: axel
-
-  macos-universal:
-    name: macos-universal
-    needs: macos-build
-    runs-on: macos-14
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
-        with: { name: macos-bin-x86_64, path: x86_64 }
-      - uses: actions/download-artifact@v4
-        with: { name: macos-bin-arm64,  path: arm64 }
-      - name: Lipo + package
+      - name: Package
         run: |
           VER="${REF#v}"
           DIST="axel-${VER}-macos-universal"
-          chmod +x x86_64/axel arm64/axel
-          lipo -create -output axel x86_64/axel arm64/axel
-          lipo -info axel
           mkdir -p "stage/$DIST"
           cp axel "stage/$DIST/"
+          cp doc/axel.1 "stage/$DIST/" 2>/dev/null || true
           cp COPYING README.md "stage/$DIST/" 2>/dev/null || true
           tar -C stage -czf "${DIST}.tar.gz" "$DIST"
       - uses: actions/upload-artifact@v4
