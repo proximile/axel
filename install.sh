@@ -53,8 +53,11 @@ esac
 ver="${AXEL_VERSION:-}"
 if [ -z "$ver" ]; then
   info "looking up the latest release..."
-  ver="$(dlout "${API}/releases/latest" \
-    | grep -m1 '"tag_name"' \
+  # Buffer the response first; piping curl into grep -m1 makes curl exit 23
+  # (SIGPIPE) when grep closes the pipe early.
+  resp="$(dlout "${API}/releases/latest")" || err "could not reach GitHub"
+  ver="$(printf '%s\n' "$resp" \
+    | grep '"tag_name"' | head -n1 \
     | sed -E 's/.*"tag_name" *: *"([^"]+)".*/\1/')"
   [ -n "$ver" ] || err "could not determine the latest version"
 fi
