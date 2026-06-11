@@ -1,0 +1,30 @@
+name: macos-test
+
+# Throwaway workflow to iterate on the macOS build recipe quickly (arm64 only,
+# no emulation). Removed once the recipe is verified.
+on:
+  workflow_dispatch:
+
+jobs:
+  macos-arm64:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build tools
+        run: |
+          brew install autoconf automake libtool pkg-config autoconf-archive \
+            gettext txt2man openssl@3
+      - name: Build
+        run: |
+          export PATH="$(brew --prefix gettext)/bin:$PATH"
+          export ACLOCAL_PATH="$(brew --prefix gettext)/share/aclocal"
+          SSL="$(brew --prefix openssl@3)"
+          autoreconf -fiv
+          ./configure --disable-Werror --disable-nls CFLAGS="-O2" \
+            SSL_CFLAGS="-I$SSL/include" \
+            SSL_LIBS="$SSL/lib/libssl.a $SSL/lib/libcrypto.a"
+          make -j3
+          echo "=== result ==="
+          file ./axel
+          otool -L ./axel
+          ./axel --version | head -1

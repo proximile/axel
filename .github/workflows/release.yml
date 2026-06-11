@@ -103,8 +103,10 @@ jobs:
             gettext txt2man openssl@3
       - name: Build
         run: |
-          # gettext is keg-only; autoreconf needs its autopoint on PATH.
+          # gettext is keg-only: put its autopoint on PATH and its m4 macros
+          # (gettext.m4 / AM_GNU_GETTEXT) on the aclocal search path.
           export PATH="$(brew --prefix gettext)/bin:$PATH"
+          export ACLOCAL_PATH="$(brew --prefix gettext)/share/aclocal"
           SSL="$(brew --prefix openssl@3)"
           autoreconf -fiv
           ./configure --disable-Werror --disable-nls CFLAGS="-O2" \
