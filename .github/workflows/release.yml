@@ -190,33 +190,42 @@ jobs:
     runs-on: windows-latest
     continue-on-error: true
     steps:
+      - name: Force LF line endings (autotools breaks on CRLF)
+        run: |
+          git config --global core.autocrlf false
+          git config --global core.eol lf
       - uses: actions/checkout@v4
       - uses: cygwin/cygwin-install-action@v4
         with:
           packages: >-
             gcc-core make autoconf automake libtool pkg-config gettext-devel
-            libssl-devel openssl-devel autoconf-archive txt2man zip file
+            libssl-devel openssl-devel autoconf-archive zip file
       - name: Build
-        shell: C:\cygwin\bin\bash.exe --login -o igncr '{0}'
+        shell: C:\cygwin\bin\bash.exe --login -o igncr -eo pipefail '{0}'
         run: |
           cd "$(cygpath '${{ github.workspace }}')"
           autoreconf -fiv
           ./configure --disable-Werror --disable-nls CFLAGS="-O2"
-          make -j2
+          # Build just the program; the txt2man man page target is unreliable
+          # under Cygwin and is not needed on Windows. EXEEXT makes it axel.exe.
+          make -j2 axel.exe
+          strip ./axel.exe
           file ./axel.exe
           ./axel.exe --version | head -1
       - name: Package with runtime DLLs
-        shell: C:\cygwin\bin\bash.exe --login -o igncr '{0}'
+        shell: C:\cygwin\bin\bash.exe --login -o igncr -eo pipefail '{0}'
         run: |
           cd "$(cygpath '${{ github.workspace }}')"
           VER="${REF#v}"
           DIST="axel-${VER}-windows-x86_64"
           mkdir -p "$DIST"
           cp axel.exe "$DIST/"
-          # Bundle the DLLs the binary links against.
+          # Bundle the Cygwin runtime DLLs the binary links against (cygwin1,
+          # cygssl-3, cygcrypto-3, cygz, ...). System api-ms-win-* are skipped.
           for dll in $(cygcheck ./axel.exe | tr -d '\r' | grep -i '\\cygwin\\' | sed 's/^ *//'); do
             cp "$dll" "$DIST/" 2>/dev/null || true
           done
+          ls -la "$DIST"
           cp COPYING README.md "$DIST/" 2>/dev/null || true
           zip -r "${DIST}.zip" "$DIST"
       - uses: actions/upload-artifact@v4
